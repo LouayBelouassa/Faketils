@@ -32,6 +32,7 @@ public class Faketils implements ClientModInitializer {
         FlyHandler.init();
         TipAll.initialize();
         Experiments.init();
+        Fossil.init();
         Harp.init();
         Fishing.initialize();
         Farming.initialize();

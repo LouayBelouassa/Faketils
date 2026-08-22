@@ -262,6 +262,13 @@ public class Config {
     @CustomDescription("Name of the weapon used for killing sea creatures (Hyperion, Flay, Veil, etc).")
     public String fishingHelperKillingWeapon = "";
 
+    @AutoGen(category = "qol", group = "other")
+    @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
+    @SerialEntry
+    @CustomName("Fossil Excavation")
+    @CustomDescription("Enables The fossil excavation Automation.")
+    public boolean fossilExcavation = false;
+
     @AutoGen(category = "qol", group = "hud")
     @IntSlider(min = -500, max = 1000, step = 1)
     @SerialEntry
