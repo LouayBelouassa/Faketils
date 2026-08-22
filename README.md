@@ -16,12 +16,13 @@
 # 🧩 Features
 
 ## ⚙️ **Quality of Life**
-- 🧱 Bigger **glass bounding boxes**
-- 🚫 **No hurt cam**
+- 🧱 Bigger **glass bounding boxes (Deprecated)**
+- 🚫 **No hurt cam (Deprecated)**
 - 💸 Auto **/tipall**
-- 📔 **Experiment Table Helper**
+- 📔 **Experiment Table Helper (Currently Bugged)**
 - 🎵 **Harp Helper**
 - 🫏 **Sphinx Solver**
+- 🦴 **Fossil Helper (New)**
 
 ---
 
@@ -58,9 +59,10 @@
 3. Go to your **/ft** settings, set up the keybinds for each **mode** depending on the **farm layout**.
 4. Once configured, the helper will automatically **hold the keys** for you.
 
-> ⚠️ **Note:**
+> ⚠️ **Notes:**
 > - The helper **does not** handle everything — you still need to manage your **pests manually**.
-
+> - Deprecated Features Last 1 Release cycle starting from Deprecation version.
+> - The plan is to Cover **most** aspects of the game, If you want something to be added feel free to make a pr.
 ---
 
 <div align="center">
