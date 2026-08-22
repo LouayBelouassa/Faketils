@@ -33,6 +33,8 @@ public class Faketils implements ClientModInitializer {
         TipAll.initialize();
         Experiments.init();
         Fossil.init();
+        Terminals.init();
+        Hunting.init();
         Harp.init();
         Fishing.initialize();
         Farming.initialize();

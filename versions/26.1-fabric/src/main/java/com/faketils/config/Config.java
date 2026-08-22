@@ -150,6 +150,13 @@ public class Config {
     @CustomDescription("Automatically sprays the plot you are currently farming in.")
     public boolean autoSpray = false;
 
+    @AutoGen(category = "farming", group = "general")
+    @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
+    @SerialEntry
+    @CustomName("Auto Reel")
+    @CustomDescription("Automatically reels in the Hunting Lasso.")
+    public boolean autoReel = false;
+
     //@AutoGen(category = "farming", group = "pests")
     //@Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
     //@SerialEntry
@@ -268,6 +275,13 @@ public class Config {
     @CustomName("Fossil Excavation")
     @CustomDescription("Enables The fossil excavation Automation.")
     public boolean fossilExcavation = false;
+
+    @AutoGen(category = "qol", group = "terminals")
+    @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
+    @SerialEntry
+    @CustomName("Terminals")
+    @CustomDescription("Enables terminal solver features.")
+    public boolean terminals = false;
 
     @AutoGen(category = "qol", group = "hud")
     @IntSlider(min = -500, max = 1000, step = 1)

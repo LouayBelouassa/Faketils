@@ -3,8 +3,10 @@ package com.faketils.features;
 import com.faketils.Faketils;
 import com.faketils.utils.Utils;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.inventory.ContainerInput;
@@ -30,6 +32,12 @@ public class Experiments {
         NONE
     }
 
+    private enum SuperpairsPhase {
+        IDLE, START_EXPERIMENT, WAIT_FOR_LEVEL_RESULT, REOPEN_FOR_BOTTLES,
+        SELECT_BOTTLES, OPEN_BOTTLES, CLICK_BOTTLES, REOPEN_FOR_SUPERPAIRS,
+        WAIT_FOR_FINAL_SUPERPAIRS, CLICK_FINAL_SUPERPAIRS, COMPLETE
+    }
+
     public static void init() {
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
             onScreenOpen(screen);
@@ -38,12 +46,25 @@ public class Experiments {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             onTick(client);
         });
+        ClientReceiveMessageEvents.GAME.register((message, overlay) -> onChat(message));
+        ClientReceiveMessageEvents.CHAT.register((message, playerChatMessage, sender, boundChatType, timeStamp) -> onChat(message));
     }
 
     private static final int START_DELAY_MIN = 234;
     private static final int START_DELAY_MAX = 678;
     private static final int END_DELAY_MIN = 777;
     private static final int END_DELAY_MAX = 3333;
+    private static final int GUI_ACTION_GRACE_PERIOD = 200;
+    private static final int FINAL_TABLE_REOPEN_DELAY = 1000;
+    // Fourth chest row, sixth column: (3 * 9) + 5.
+    private static final int SUPERPAIRS_START_SLOT = 32;
+    // Sixth chest row, sixth column: (5 * 9) + 5.
+    private static final int SUPERPAIRS_BOTTLES_SLOT = 50;
+    // Second chest row, sixth column: (1 * 9) + 5.
+    private static final int BOTTLES_CONFIRM_SLOT = 14;
+    // Third chest row, fifth column: (2 * 9) + 4.
+    private static final int SUPERPAIRS_FINAL_SLOT = 22;
+    private static final String LOW_LEVEL_MESSAGE = "Your Minecraft level is too low to start this experiment!";
 
     private static final Random rng = new Random();
 
@@ -54,6 +75,9 @@ public class Experiments {
     private static int lastAdded = 0, clicks = 0;
     private static long startDelay = -1, endDelay = -1, clickDelay = -1;
     private static boolean sequenceAdded = false;
+    private static SuperpairsPhase superpairsPhase = SuperpairsPhase.IDLE;
+    private static long superpairsScreenOpenedAt = -1;
+    private static long reopenAt = -1;
 
     public static void onScreenOpen(Screen screen) {
         if (!Faketils.config().exp) {
@@ -73,6 +97,30 @@ public class Experiments {
         } else if (title.startsWith("Ultrasequencer (")) {
             Utils.log("Ultrasequencer detected");
             currentExperiment = ExperimentType.ULTRASEQUENCER;
+        } else if (title.contains("Superpairs") && title.contains("Stakes")) {
+            Utils.log("Superpairs detected");
+            currentExperiment = ExperimentType.SUPERPAIRS;
+            superpairsScreenOpenedAt = System.currentTimeMillis();
+            if (superpairsPhase == SuperpairsPhase.WAIT_FOR_FINAL_SUPERPAIRS) {
+                superpairsPhase = SuperpairsPhase.CLICK_FINAL_SUPERPAIRS;
+            } else if (superpairsPhase != SuperpairsPhase.SELECT_BOTTLES) {
+                superpairsPhase = SuperpairsPhase.START_EXPERIMENT;
+            }
+        } else if (title.equals("Bottles of Enchanting") && superpairsPhase == SuperpairsPhase.OPEN_BOTTLES) {
+            currentExperiment = ExperimentType.SUPERPAIRS;
+            superpairsScreenOpenedAt = System.currentTimeMillis();
+            superpairsPhase = SuperpairsPhase.CLICK_BOTTLES;
+        } else if (superpairsPhase == SuperpairsPhase.SELECT_BOTTLES ||
+                superpairsPhase == SuperpairsPhase.OPEN_BOTTLES ||
+                superpairsPhase == SuperpairsPhase.WAIT_FOR_FINAL_SUPERPAIRS) {
+            // The preceding Superpairs action opened this container; keep the transition alive even if its title varies.
+            currentExperiment = ExperimentType.SUPERPAIRS;
+            superpairsScreenOpenedAt = System.currentTimeMillis();
+            if (superpairsPhase == SuperpairsPhase.OPEN_BOTTLES) {
+                superpairsPhase = SuperpairsPhase.CLICK_BOTTLES;
+            } else if (superpairsPhase == SuperpairsPhase.WAIT_FOR_FINAL_SUPERPAIRS) {
+                superpairsPhase = SuperpairsPhase.CLICK_FINAL_SUPERPAIRS;
+            }
         } else if (title.contains("Over")) {
             Utils.log("Experiment over.");
             currentExperiment = ExperimentType.END;
@@ -88,13 +136,18 @@ public class Experiments {
             return;
         }
 
+        long now = System.currentTimeMillis();
+        if (currentExperiment == ExperimentType.SUPERPAIRS) {
+            tickSuperpairs(client, now);
+            return;
+        }
+
         if (!(client.screen instanceof AbstractContainerScreen)) {
             clearAll();
             return;
         }
 
         AbstractContainerMenu handler = client.player.containerMenu;
-        long now = System.currentTimeMillis();
 
         if (startDelay == -1) {
             startDelay = now + rng.nextInt(START_DELAY_MAX - START_DELAY_MIN) + START_DELAY_MIN;
@@ -156,7 +209,8 @@ public class Experiments {
         }
 
         if (sequenceAdded && flag.is(Items.CLOCK) &&
-                chronomatronOrder.size() > clicks) {
+                chronomatronOrder.size() > clicks &&
+                !container.get(lastAdded).getItem().hasFoil()) {
 
             if (clickDelay == -1) {
                 clickDelay = now + rng.nextInt(1000 - 250) + 250;
@@ -219,11 +273,79 @@ public class Experiments {
         }
     }
 
+    private static void tickSuperpairs(Minecraft client, long now) {
+        if (superpairsPhase == SuperpairsPhase.REOPEN_FOR_BOTTLES ||
+                superpairsPhase == SuperpairsPhase.REOPEN_FOR_SUPERPAIRS) {
+            if (client.screen == null && now >= reopenAt) {
+                KeyMapping.click(client.options.keyUse.getDefaultKey());
+                superpairsPhase = superpairsPhase == SuperpairsPhase.REOPEN_FOR_BOTTLES
+                        ? SuperpairsPhase.SELECT_BOTTLES
+                        : SuperpairsPhase.WAIT_FOR_FINAL_SUPERPAIRS;
+                superpairsScreenOpenedAt = -1;
+            }
+            return;
+        }
+
+        if (!(client.screen instanceof AbstractContainerScreen) || client.gameMode == null) {
+            return;
+        }
+
+        if (superpairsScreenOpenedAt == -1) {
+            superpairsScreenOpenedAt = now;
+            return;
+        }
+
+        if (now - superpairsScreenOpenedAt < GUI_ACTION_GRACE_PERIOD) {
+            return;
+        }
+
+        AbstractContainerMenu handler = client.player.containerMenu;
+        switch (superpairsPhase) {
+            case START_EXPERIMENT -> {
+                clickSlot(client, handler, SUPERPAIRS_START_SLOT, 0, ContainerInput.PICKUP);
+                superpairsPhase = SuperpairsPhase.WAIT_FOR_LEVEL_RESULT;
+            }
+            case CLICK_BOTTLES -> {
+                clickSlot(client, handler, BOTTLES_CONFIRM_SLOT, 0, ContainerInput.PICKUP);
+                client.player.closeContainer();
+                superpairsPhase = SuperpairsPhase.REOPEN_FOR_SUPERPAIRS;
+                reopenAt = now + FINAL_TABLE_REOPEN_DELAY;
+            }
+            case CLICK_FINAL_SUPERPAIRS -> {
+                clickSlot(client, handler, SUPERPAIRS_FINAL_SLOT, 0, ContainerInput.PICKUP);
+                superpairsPhase = SuperpairsPhase.COMPLETE;
+            }
+            case SELECT_BOTTLES -> {
+                clickSlot(client, handler, SUPERPAIRS_BOTTLES_SLOT, 0, ContainerInput.PICKUP);
+                superpairsPhase = SuperpairsPhase.OPEN_BOTTLES;
+            }
+            default -> {
+            }
+        }
+    }
+
+    private static void onChat(net.minecraft.network.chat.Component message) {
+        if (!Faketils.config().exp || superpairsPhase != SuperpairsPhase.WAIT_FOR_LEVEL_RESULT) {
+            return;
+        }
+
+        if (Utils.stripColorCodes(message.getString()).contains(LOW_LEVEL_MESSAGE)) {
+            if (Faketils.mc.player != null) {
+                Faketils.mc.player.closeContainer();
+            }
+            superpairsPhase = SuperpairsPhase.REOPEN_FOR_BOTTLES;
+            reopenAt = System.currentTimeMillis() + GUI_ACTION_GRACE_PERIOD;
+        }
+    }
+
     private static void clearAll() {
         currentExperiment = ExperimentType.NONE;
         chronomatronOrder.clear();
         ultrasequencerOrder.clear();
         sequenceAdded = false;
+        superpairsPhase = SuperpairsPhase.IDLE;
+        superpairsScreenOpenedAt = -1;
+        reopenAt = -1;
         lastAdded = 0;
         clickDelay = -1;
         endDelay = -1;

@@ -482,8 +482,9 @@ public class Farming {
 
         if (mc.screen == null) return;
 
-        String title = mc.screen.getTitle().getString().replaceAll("§.", "").trim().toLowerCase();
-        if (!title.contains("loadouts")) return;
+        if (!(mc.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen)) {
+            return;
+        }
 
         AbstractContainerMenu handler = mc.player.containerMenu;
         int syncId = handler.containerId;

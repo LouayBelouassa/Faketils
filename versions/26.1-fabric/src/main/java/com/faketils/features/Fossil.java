@@ -34,8 +34,8 @@ public class Fossil {
     private static final int ROW_FOUR_SLOT_FIVE = 31;
     private static final int EXCAVATOR_SLOT_COUNT = 54;
     private static final int INITIAL_SLOT_CHECK_DELAY = 300;
-    private static final int PANE_CLICK_DELAY_MIN = 100;
-    private static final int PANE_CLICK_DELAY_MAX = 200;
+    private static final int PANE_CLICK_DELAY_MIN = 250;
+    private static final int PANE_CLICK_DELAY_MAX = 350;
     private static final int MAX_REOPEN_ATTEMPTS = 3;
     private static final int INITIAL_REOPEN_DELAY = 1000;
     private static final int REOPEN_ATTEMPT_DELAY = 1000;
@@ -77,9 +77,6 @@ public class Fossil {
             initialSlotCheckAt = System.currentTimeMillis() + INITIAL_SLOT_CHECK_DELAY;
             awaitingCompletion = false;
             clearReopenState();
-            if (Faketils.mc.player != null) {
-                Faketils.mc.player.sendSystemMessage(Component.literal("§7[§bFaketils§7] §aFossil Excavator detected."));
-            }
             Utils.log("Fossil Excavator detected");
         }
     }
@@ -116,7 +113,6 @@ public class Fossil {
 
         boolean triggerHasItem = handler.slots.get(ROW_TWO_SLOT_FOUR).hasItem();
         if (!initialSlotCheckComplete) {
-            Utils.log("Fossil Excavator row 2, slot 4 has item: " + triggerHasItem);
             initialSlotCheckComplete = true;
             if (!triggerHasItem) {
                 client.player.closeContainer();
