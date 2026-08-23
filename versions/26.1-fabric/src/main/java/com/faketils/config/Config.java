@@ -157,6 +157,13 @@ public class Config {
     @CustomDescription("Automatically reels in the Hunting Lasso.")
     public boolean autoReel = false;
 
+    @AutoGen(category = "farming", group = "pests")
+    @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
+    @SerialEntry
+    @CustomName("Day/Night Swapping")
+    @CustomDescription("Switches Garden time before Squeaky and Rooted loadout changes.")
+    public boolean dayNightSwapping = false;
+
     //@AutoGen(category = "farming", group = "pests")
     //@Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
     //@SerialEntry
@@ -209,15 +216,15 @@ public class Config {
     @AutoGen(category = "farming", group = "pet_swapping")
     @StringField
     @SerialEntry
-    @CustomName("Rooted Loadout Slot")
-    @CustomDescription("Loadout slot used for Rooted equipment.")
+    @CustomName("Rooted Loadout Name")
+    @CustomDescription("Exact name of the loadout used for Rooted equipment.")
     public String eqSlot = "";
 
     @AutoGen(category = "farming", group = "pet_swapping")
     @StringField
     @SerialEntry
-    @CustomName("Squeaky Loadout Slot")
-    @CustomDescription("Loadout slot used for Squeaky equipment.")
+    @CustomName("Squeaky Loadout Name")
+    @CustomDescription("Exact name of the loadout used for Squeaky equipment.")
     public String eqSlotOld = "";
 
     @AutoGen(category = "fishing", group = "helpers")

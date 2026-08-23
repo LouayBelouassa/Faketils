@@ -37,6 +37,13 @@ public class Farming {
 
     private static final Minecraft mc = Minecraft.getInstance();
     private static final Random random = new Random();
+    private static final int GUI_CLICK_DELAY_MIN = 250;
+    private static final int GUI_CLICK_DELAY_MAX = 350;
+    private static final int COMMAND_DELAY_MIN = 300;
+    private static final int COMMAND_DELAY_MAX = 350;
+    private static final int MACRO_PAUSE_DELAY = 300;
+    private static final int TOOL_RESTORE_DELAY = 300;
+    private static final int MACRO_RESUME_DELAY = 300;
 
     private static final KeyMapping toggleKey = Faketils.config().toggleMacro;
     private static final KeyMapping pauseKey = Faketils.config().pauseMacro;
@@ -58,11 +65,27 @@ public class Farming {
     private static WardrobePhase wardrobePhase = WardrobePhase.IDLE;
     private static long wardrobePhaseStart = 0L;
     private static boolean wardrobeSuccess = false;
-    private enum EqPhase { IDLE, OPEN_SENT, CLICKING_SLOT, WAIT_AFTER_CLICK, CLOSING, DONE }
+    private enum EqPhase { IDLE, OPEN_SENT, CLICKING_SLOT, WAIT_FOR_EQUIP_CONFIRMATION }
     private static EqPhase eqPhase = EqPhase.IDLE;
     private static long eqPhaseStart = 0L;
+    private static long eqMenuOpenedAt = -1L;
+    private static long eqClickAt = -1L;
     private static String eqTargetSlot = "";
     private static long lastSellTime = 0L;
+
+    private enum GardenTimePhase { IDLE, REQUESTING_DESK, OPENING_DESK, WAITING_FOR_TIME_MENU, SELECTING_TIME, WAIT_AFTER_SELECTION }
+    private enum PendingPestAction { NONE, START_SQUEAKY_LOADOUT, PAUSE_AND_WARP_TO_PEST }
+    private static GardenTimePhase gardenTimePhase = GardenTimePhase.IDLE;
+    private static PendingPestAction pendingPestAction = PendingPestAction.NONE;
+    private static boolean requestedDaytime = false;
+    private static long gardenTimePhaseStartedAt = -1L;
+    private static long gardenTimeActionAt = -1L;
+    private static int deskContainerId = -1;
+
+    private enum PestResumePhase { IDLE, RESTORE_FARMING_TOOL, RESUME_MACRO }
+    private static PestResumePhase pestResumePhase = PestResumePhase.IDLE;
+    private static long pestResumeActionAt = -1L;
+    private static int pausedFarmingToolSlot = -1;
 
     private static enum EqState { IDLE, OPENING, WAIT_AFTER_OPEN, SEARCHING_ITEMS, PICKUP_CLICKED, PLACE_CLICKED, FINISHED_ITEMS }
     private static EqState eqState = EqState.IDLE;
@@ -274,6 +297,7 @@ public class Farming {
         });
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             String text = message.getString().replaceAll("§.", "");
+            handleLoadoutEquipConfirmation(text);
             Pattern pattern = Pattern.compile("Pest have spawned in Plot\\s*-\\s*(\\d+)");
             Matcher matcher = pattern.matcher(text);
 
@@ -318,7 +342,7 @@ public class Farming {
                     RotationHandler.reset();
                     currentPestMob = null;
                     needsRetarget = true;
-                    handlePause();
+                    queuePestResume();
                     if (!Faketils.config().pestFarming) {
                         currentMode = null;
                         mc.player.connection.sendCommand("warp garden");
@@ -334,6 +358,9 @@ public class Farming {
                 }
             }
         });
+        ClientReceiveMessageEvents.CHAT.register((message, playerChatMessage, sender, boundChatType, timeStamp) ->
+                handleLoadoutEquipConfirmation(message.getString().replaceAll("§.", ""))
+        );
     }
 
     public static boolean isMouseLocked() {
@@ -364,6 +391,8 @@ public class Farming {
         while (pauseKey.consumeClick()) handlePause();
         while (resetKey.consumeClick()) handleReset();
 
+        handlePendingPestResume();
+
         if (killingPests && isPaused) {
             currentState = "Killing pests";
             resetKilling();
@@ -389,6 +418,12 @@ public class Farming {
         }
 
         handleRodSequence();
+
+        if (gardenTimePhase != GardenTimePhase.IDLE) {
+            releaseAllKeys();
+            handleGardenTimeSwap();
+            return;
+        }
 
         if (eqActive && !isSpraying) {
             releaseAllKeys();
@@ -462,6 +497,8 @@ public class Farming {
                 : Faketils.config().eqSlotOld;
         eqPhase = EqPhase.OPEN_SENT;
         eqPhaseStart = System.currentTimeMillis();
+        eqMenuOpenedAt = -1L;
+        eqClickAt = -1L;
         eqActive = true;
         currentState = "Changing EQ";
         mc.player.connection.sendCommand("loadout");
@@ -474,7 +511,10 @@ public class Farming {
         long now = System.currentTimeMillis();
 
         if (now - eqPhaseStart > 10_000) {
-            Utils.log("Equipment screen never opened → aborting");
+            Utils.log("Equipment sequence timed out → aborting");
+            if (mc.screen != null) {
+                mc.player.closeContainer();
+            }
             eqPhase = EqPhase.IDLE;
             eqActive = false;
             return;
@@ -488,61 +528,275 @@ public class Farming {
 
         AbstractContainerMenu handler = mc.player.containerMenu;
         int syncId = handler.containerId;
+        if (eqMenuOpenedAt == -1L) {
+            eqMenuOpenedAt = now;
+            eqClickAt = now + nextGuiClickDelay();
+        }
 
         switch (eqPhase) {
             case OPEN_SENT -> {
-                if (now - eqPhaseStart > 400 + random.nextInt(300)) {
+                if (now >= eqClickAt) {
                     eqPhase = EqPhase.CLICKING_SLOT;
                     eqPhaseStart = now;
                     Utils.log("Equipment window ready");
                 }
             }
             case CLICKING_SLOT -> {
-                if (now - eqPhaseStart < 300 + random.nextInt(300)) return;
+                if (now < eqClickAt) return;
 
                 for (int i = 0; i < handler.slots.size(); i++) {
                     ItemStack stack = handler.getSlot(i).getItem();
                     if (stack.isEmpty()) continue;
                     String name = stack.getHoverName().getString()
                             .replaceAll("§.", "").toLowerCase().trim();
-                    if (name.contains(eqTargetSlot)) {
+                    if (matchesLoadoutName(name, eqTargetSlot)) {
                         mc.gameMode.handleContainerInput(syncId, i, 0, ContainerInput.PICKUP, mc.player);
-                        Utils.log("Clicked equipment preset slot " + eqTargetSlot + " at index " + i);
-                        eqPhase = EqPhase.WAIT_AFTER_CLICK;
+                        Utils.log("Clicked equipment preset " + eqTargetSlot + " at index " + i);
+                        eqPhase = EqPhase.WAIT_FOR_EQUIP_CONFIRMATION;
                         eqPhaseStart = now;
                         return;
                     }
                 }
                 if (now - eqPhaseStart > 8_000) {
-                    Utils.log("Equipment slot " + eqTargetSlot + " not found → aborting");
+                    Utils.log("Equipment preset " + eqTargetSlot + " not found → aborting");
                     mc.player.closeContainer();
                     eqPhase = EqPhase.IDLE;
                     eqActive = false;
                 }
             }
-            case WAIT_AFTER_CLICK -> {
-                if (now - eqPhaseStart > 150 + random.nextInt(150)) {
-                    eqPhase = EqPhase.CLOSING;
-                    eqPhaseStart = now;
-                }
-            }
-            case CLOSING -> {
-                mc.player.closeContainer();
-                Utils.log("Closing equipment screen");
-                eqPhase = EqPhase.DONE;
-                onEqSequenceDone(now);
-                eqPhaseStart = now;
-                rodPhase = RodPhase.DONE;
-            }
-            case DONE -> {
-                //can't add anything cuz screen==null check above
-            }
             default -> {}
+        }
+    }
+
+    private static boolean matchesLoadoutName(String itemName, String configuredName) {
+        String target = configuredName.trim().toLowerCase();
+        if (target.isEmpty()) {
+            return false;
+        }
+
+        return itemName.equals(target);
+    }
+
+    private static void handleLoadoutEquipConfirmation(String message) {
+        if (eqPhase != EqPhase.WAIT_FOR_EQUIP_CONFIRMATION || mc.player == null) {
+            return;
+        }
+
+        String text = message.toLowerCase(Locale.ROOT);
+        if (!text.contains("you equipped") && !text.contains("you equiped")) {
+            return;
+        }
+
+        mc.player.closeContainer();
+        onEqSequenceDone(System.currentTimeMillis());
+        eqActive = false;
+        Utils.log("Loadout equipped; closing loadout screen and resuming farming.");
+
+        if (currentPestPhase == PestPhase.ROOTED && isActive && !isPaused && plot > 0) {
+            if (Faketils.config().dayNightSwapping) {
+                requestGardenTimeSwap(true, PendingPestAction.PAUSE_AND_WARP_TO_PEST);
+            } else {
+                pauseAndWarpToInfestedPlot();
+            }
         }
     }
 
     private static void onEqSequenceDone(long now) {
         eqPhase = EqPhase.IDLE;
+        eqMenuOpenedAt = -1L;
+        eqClickAt = -1L;
+    }
+
+    private static void requestGardenTimeSwap(boolean daytime, PendingPestAction actionAfterSwap) {
+        if (mc.player == null || gardenTimePhase != GardenTimePhase.IDLE) {
+            return;
+        }
+
+        requestedDaytime = daytime;
+        pendingPestAction = actionAfterSwap;
+        gardenTimePhase = GardenTimePhase.REQUESTING_DESK;
+        gardenTimePhaseStartedAt = System.currentTimeMillis();
+        gardenTimeActionAt = gardenTimePhaseStartedAt + nextCommandDelay();
+        deskContainerId = -1;
+        Utils.log("Preparing to switch Garden time to " + (daytime ? "day" : "night"));
+    }
+
+    private static void handleGardenTimeSwap() {
+        if (mc.player == null) {
+            clearGardenTimeSwap();
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if (now - gardenTimePhaseStartedAt > 10_000) {
+            Utils.log("Garden time swap timed out");
+            if (mc.screen != null) {
+                mc.player.closeContainer();
+            }
+            clearGardenTimeSwap();
+            return;
+        }
+
+        if (gardenTimePhase == GardenTimePhase.WAIT_AFTER_SELECTION) {
+            if (now >= gardenTimeActionAt) {
+                if (mc.screen != null) {
+                    mc.player.closeContainer();
+                }
+                PendingPestAction action = pendingPestAction;
+                clearGardenTimeSwap();
+                runPendingPestAction(action);
+            }
+            return;
+        }
+
+        if (gardenTimePhase == GardenTimePhase.REQUESTING_DESK) {
+            if (now >= gardenTimeActionAt) {
+                mc.player.connection.sendCommand("desk");
+                gardenTimePhase = GardenTimePhase.OPENING_DESK;
+                gardenTimePhaseStartedAt = now;
+                gardenTimeActionAt = -1L;
+                Utils.log("Opening desk to switch Garden time");
+            }
+            return;
+        }
+
+        if (!(mc.screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen)) {
+            return;
+        }
+
+        AbstractContainerMenu handler = mc.player.containerMenu;
+        switch (gardenTimePhase) {
+            case OPENING_DESK -> {
+                if (gardenTimeActionAt == -1L) {
+                    gardenTimeActionAt = now + nextGuiClickDelay();
+                    return;
+                }
+                if (now >= gardenTimeActionAt) {
+                    clickContainerSlot(handler, 50);
+                    deskContainerId = handler.containerId;
+                    gardenTimePhase = GardenTimePhase.WAITING_FOR_TIME_MENU;
+                    gardenTimePhaseStartedAt = now;
+                }
+            }
+            case WAITING_FOR_TIME_MENU -> {
+                String title = mc.screen.getTitle().getString();
+                if (handler.containerId != deskContainerId || title.contains("Garden Time")) {
+                    gardenTimePhase = GardenTimePhase.SELECTING_TIME;
+                    gardenTimePhaseStartedAt = now;
+                    gardenTimeActionAt = now + nextGuiClickDelay();
+                }
+            }
+            case SELECTING_TIME -> {
+                if (now >= gardenTimeActionAt) {
+                    clickContainerSlot(handler, requestedDaytime ? 11 : 13);
+                    gardenTimePhase = GardenTimePhase.WAIT_AFTER_SELECTION;
+                    gardenTimePhaseStartedAt = now;
+                    gardenTimeActionAt = now + nextGuiClickDelay();
+                }
+            }
+            default -> {
+            }
+        }
+    }
+
+    private static void clickContainerSlot(AbstractContainerMenu handler, int slot) {
+        if (mc.player == null || mc.gameMode == null || handler.slots.size() <= slot) {
+            return;
+        }
+
+        mc.gameMode.handleContainerInput(handler.containerId, slot, 0, ContainerInput.PICKUP, mc.player);
+    }
+
+    private static void runPendingPestAction(PendingPestAction action) {
+        switch (action) {
+            case START_SQUEAKY_LOADOUT -> startEqSequence(PestPhase.SQUEAKY);
+            case PAUSE_AND_WARP_TO_PEST -> pauseAndWarpToInfestedPlot();
+            default -> {
+            }
+        }
+    }
+
+    private static void pauseAndWarpToInfestedPlot() {
+        if (mc.player == null || !isActive || isPaused || plot <= 0) {
+            return;
+        }
+
+        int infestedPlot = plot;
+        new Thread(() -> {
+            try {
+                Thread.sleep(MACRO_PAUSE_DELAY);
+            } catch (InterruptedException ignored) {
+                return;
+            }
+            mc.execute(() -> {
+                if (mc.player == null || !isActive || isPaused) {
+                    return;
+                }
+                handlePause();
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(nextCommandDelay());
+                    } catch (InterruptedException ignored) {
+                        return;
+                    }
+                    mc.execute(() -> {
+                        if (mc.player != null) {
+                            mc.player.connection.sendCommand("tptoplot " + infestedPlot);
+                            Utils.log("Warping to infested plot " + infestedPlot);
+                        }
+                    });
+                }).start();
+            });
+        }).start();
+    }
+
+    private static void clearGardenTimeSwap() {
+        gardenTimePhase = GardenTimePhase.IDLE;
+        pendingPestAction = PendingPestAction.NONE;
+        gardenTimePhaseStartedAt = -1L;
+        gardenTimeActionAt = -1L;
+        deskContainerId = -1;
+    }
+
+    private static int nextGuiClickDelay() {
+        return random.nextInt(GUI_CLICK_DELAY_MAX - GUI_CLICK_DELAY_MIN + 1) + GUI_CLICK_DELAY_MIN;
+    }
+
+    private static int nextCommandDelay() {
+        return random.nextInt(COMMAND_DELAY_MAX - COMMAND_DELAY_MIN + 1) + COMMAND_DELAY_MIN;
+    }
+
+    private static void queuePestResume() {
+        if (!isActive || pestResumePhase != PestResumePhase.IDLE) {
+            return;
+        }
+
+        pestResumePhase = PestResumePhase.RESTORE_FARMING_TOOL;
+        pestResumeActionAt = System.currentTimeMillis() + TOOL_RESTORE_DELAY;
+    }
+
+    private static void handlePendingPestResume() {
+        if (pestResumePhase == PestResumePhase.IDLE || mc.player == null || System.currentTimeMillis() < pestResumeActionAt) {
+            return;
+        }
+
+        if (pestResumePhase == PestResumePhase.RESTORE_FARMING_TOOL) {
+            if (pausedFarmingToolSlot >= 0 && pausedFarmingToolSlot < 9) {
+                setSlot(pausedFarmingToolSlot);
+                Utils.log("Restored farming tool slot " + (pausedFarmingToolSlot + 1));
+            }
+            pestResumePhase = PestResumePhase.RESUME_MACRO;
+            pestResumeActionAt = System.currentTimeMillis() + MACRO_RESUME_DELAY;
+            return;
+        }
+
+        if (pestResumePhase == PestResumePhase.RESUME_MACRO) {
+            if (isPaused) {
+                handlePause();
+            }
+            pestResumePhase = PestResumePhase.IDLE;
+            pestResumeActionAt = -1L;
+        }
     }
 
     private static void handleRodSequence() {
@@ -914,7 +1168,7 @@ public class Farming {
                 RotationHandler.reset();
                 currentPestMob = null;
                 needsRetarget = true;
-                handlePause();
+                queuePestResume();
                 if (!Faketils.config().pestFarming) {
                     currentMode = null;
                     mc.player.connection.sendCommand("warp garden");
@@ -986,8 +1240,11 @@ public class Farming {
             pestsSpawned = false;
             if (isActive && !isPaused) {
                 releaseAllKeys();
-                eqActive = true;
-                startEqSequence(PestPhase.SQUEAKY);
+                if (Faketils.config().dayNightSwapping) {
+                    requestGardenTimeSwap(false, PendingPestAction.START_SQUEAKY_LOADOUT);
+                } else {
+                    startEqSequence(PestPhase.SQUEAKY);
+                }
             }
             eqState = EqState.OPENING;
             eqStateStart = now;
@@ -1051,6 +1308,9 @@ public class Farming {
 
         if (isPaused) {
             lastXp = System.currentTimeMillis();
+            if (mc.player != null) {
+                pausedFarmingToolSlot = getSlot();
+            }
             releaseAllKeys();
             movementBlockTicks = 10;
 

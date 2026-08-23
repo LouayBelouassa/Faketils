@@ -19,18 +19,27 @@
 - 🧱 Bigger **glass bounding boxes (Deprecated)**
 - 🚫 **No hurt cam (Deprecated)**
 - 💸 Auto **/tipall**
-- 📔 **Experiment Table Helper (Currently Bugged)**
+- 📔 **Experiment Table Helper**
+  - ⏱️ **Chronomatron**, **Ultrasequencer**, and **Superpairs** Helpers
 - 🎵 **Harp Helper**
 - 🫏 **Sphinx Solver**
-- 🦴 **Fossil Helper (New)**
+- 🦴 **Fossil Excavation Helper (New)**
 
 ---
 
 ## 🌾 **Farming**
 - 🌿 **Funny Farming Helper**
+- 🧴 **Auto Spraynator**
+- 🌙 **Day/Night Pest Swapping**
+- 🎒 **Pest Loadout Swapping**
 
 ### 🐛 **Pests**
 - 🕷️ **Pest Highlighter**
+
+---
+
+## 🏹 **Hunting**
+- 🪢 **Hunting Lasso Auto Reel (New)**
 
 ---
 
