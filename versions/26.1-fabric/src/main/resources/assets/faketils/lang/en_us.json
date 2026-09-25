@@ -21,6 +21,11 @@
   "yacl3.config.faketils:config.category.qol": "Quality of Life",
   "yacl3.config.faketils:config.category.qol.group.hud": "HUD",
   "yacl3.config.faketils:config.category.qol.group.other": "Other",
+  "yacl3.config.faketils:config.category.qol.group.mob_esp": "Mob ESP",
+  "yacl3.config.faketils:config.category.qol.group.terminals": "Terminals",
+
+  "yacl3.config.faketils:config.category.mining": "Mining",
+  "yacl3.config.faketils:config.category.mining.group.aim_assist": "Gemstone Mining",
 
   "yacl3.config.faketils:config.category.debug": "Debug",
   "yacl3.config.faketils:config.category.debug.group.dev": "Developer",

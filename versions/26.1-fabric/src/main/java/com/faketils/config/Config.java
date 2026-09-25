@@ -157,6 +157,13 @@ public class Config {
     @CustomDescription("Automatically reels in the Hunting Lasso.")
     public boolean autoReel = false;
 
+    @AutoGen(category = "farming", group = "general")
+    @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
+    @SerialEntry
+    @CustomName("Pest Hunting")
+    @CustomDescription("When enabled, switches to the hunting loadout instead of rooted equipment when pests spawn.")
+    public boolean pestHunting = false;
+
     @AutoGen(category = "farming", group = "pests")
     @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
     @SerialEntry
@@ -227,6 +234,13 @@ public class Config {
     @CustomDescription("Exact name of the loadout used for Squeaky equipment.")
     public String eqSlotOld = "";
 
+    @AutoGen(category = "farming", group = "pet_swapping")
+    @StringField
+    @SerialEntry
+    @CustomName("Hunting Loadout Name")
+    @CustomDescription("Exact name of the loadout used for Pest Hunting equipment.")
+    public String huntingLoadout = "";
+
     @AutoGen(category = "fishing", group = "helpers")
     @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
     @SerialEntry
@@ -282,6 +296,41 @@ public class Config {
     @CustomName("Fossil Excavation")
     @CustomDescription("Enables The fossil excavation Automation.")
     public boolean fossilExcavation = false;
+
+    @AutoGen(category = "qol", group = "mob_esp")
+    @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
+    @SerialEntry
+    @CustomName("Mob ESP")
+    @CustomDescription("Highlights nearby mobs whose SkyBlock name contains the configured text.")
+    public boolean mobEsp = false;
+
+    @AutoGen(category = "qol", group = "mob_esp")
+    @StringField
+    @SerialEntry
+    @CustomName("Mob Name")
+    @CustomDescription("Comma-separated parts of SkyBlock mob names to highlight, ignoring formatting and capitalization.")
+    public String mobEspName = "";
+
+    @AutoGen(category = "qol", group = "mob_esp")
+    @IntSlider(min = 10, max = 250, step = 5)
+    @SerialEntry
+    @CustomName("Detection Range")
+    @CustomDescription("Horizontal distance, in blocks, used when looking for matching mobs.")
+    public int mobEspRange = 50;
+
+    @AutoGen(category = "mining", group = "aim_assist")
+    @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
+    @SerialEntry
+    @CustomName("Gemstone Mining")
+    @CustomDescription("While holding a drill, aims at and mines the nearest colored glass pane or block within normal reach.")
+    public boolean drillPaneAim = false;
+
+    @AutoGen(category = "mining", group = "aim_assist")
+    @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)
+    @SerialEntry
+    @CustomName("Show Gemstone Target")
+    @CustomDescription("Draws a waypoint marker on the colored glass block currently selected for Gemstone Mining.")
+    public boolean showGemstoneTarget = true;
 
     @AutoGen(category = "qol", group = "terminals")
     @Boolean(formatter = Boolean.Formatter.YES_NO, colored = true)

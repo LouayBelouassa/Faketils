@@ -198,6 +198,7 @@ public class RenderUtils {
         renderLine(eye, target, color, width, event);
     }
 
+
     private static void addCube(
             BufferBuilder buffer,
             Matrix4f m,

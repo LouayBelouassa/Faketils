@@ -17,14 +17,11 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.network.chat.Component;
 
 import java.util.HashSet;
-import java.util.Random;
 import java.util.Set;
 
 public class Fishing {
 
     private static final Minecraft mc = Minecraft.getInstance();
-    private static final Random random = new Random();
-
     private static int clickTimer = 0;
     private static boolean hasClickedOnce = false;
     private static boolean scheduledClick = false;
@@ -35,6 +32,7 @@ public class Fishing {
     private static int weaponSlot = 0;
     private static int delayCounter = 0;
     private static int clickCount = 0;
+    private static long nextWeaponUseTick = 0L;
 
     private static final float LOOK_DOWN_PITCH = 89f;
     private static float savedYaw = 0f;
@@ -52,14 +50,15 @@ public class Fishing {
 
     private static final int STATE_IDLE              = 0;
     private static final int STATE_PRE_ROTATE        = 1;
-    private static final int STATE_SWITCH_DELAY      = 2;
     private static final int STATE_SWITCH_TO_WEAPON  = 3;
     private static final int STATE_WAIT_SWITCH       = 4;
     private static final int STATE_CLICK_WEAPON      = 5;
     private static final int STATE_WAIT_SWITCH_BACK  = 6;
-    private static final int STATE_SWITCH_BACK       = 7;
     private static final int STATE_POST_ROTATE       = 8;
     private static final int STATE_DONE              = 9;
+    private static final int WEAPON_RESTORE_DELAY_TICKS = 1;
+    private static final int ROD_RECAST_DELAY_TICKS = 1;
+    private static final int MULTI_WEAPON_USE_COOLDOWN_TICKS = 2;
 
     public static void initialize() {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -149,7 +148,7 @@ public class Fishing {
         }
 
         if (scheduledClick) {
-            clickTimer = random.nextInt(6) + 5;
+            clickTimer = ROD_RECAST_DELAY_TICKS;
             hasClickedOnce = true;
 
             Utils.simulateUseItem(gameMode);
@@ -161,6 +160,7 @@ public class Fishing {
                 if (weapon != null) {
                     originalSlot = inventory.getSelectedSlot();
                     weaponSlot = weapon.slot;
+                    nextWeaponUseTick = 0L;
 
                     if (Faketils.config().fishingLookDown) {
                         savedYaw = player.getYRot();
@@ -168,8 +168,7 @@ public class Fishing {
                         RotationHandler.setTarget(savedYaw, LOOK_DOWN_PITCH);
                         weaponState = STATE_PRE_ROTATE;
                     } else {
-                        weaponState = STATE_SWITCH_DELAY;
-                        delayCounter = random.nextInt(4) + 2;
+                        weaponState = STATE_SWITCH_TO_WEAPON;
                     }
                     Utils.log("Weapon found in slot " + weaponSlot + ", switching...");
                 }
@@ -180,27 +179,24 @@ public class Fishing {
             switch (weaponState) {
                 case STATE_PRE_ROTATE -> {
                     if (!RotationHandler.active) {
-                        weaponState = STATE_SWITCH_DELAY;
-                        delayCounter = random.nextInt(4) + 2;
-                    }
-                }
-                case STATE_SWITCH_DELAY -> {
-                    if (delayCounter-- <= 0) {
                         weaponState = STATE_SWITCH_TO_WEAPON;
                     }
                 }
                 case STATE_SWITCH_TO_WEAPON -> {
                     inventory.setSelectedSlot(weaponSlot);
-                    delayCounter = random.nextInt(4) + 2;
+                    delayCounter = 0;
                     weaponState = STATE_WAIT_SWITCH;
                 }
                 case STATE_WAIT_SWITCH -> {
                     if (delayCounter-- <= 0) {
                         weaponState = STATE_CLICK_WEAPON;
-                        delayCounter = random.nextInt(4) + 3;
+                        delayCounter = 0;
                     }
                 }
                 case STATE_CLICK_WEAPON -> {
+                    if (mc.level != null && mc.level.getGameTime() < nextWeaponUseTick) {
+                        break;
+                    }
                     if (delayCounter-- <= 0) {
                         Utils.simulateUseItem(gameMode);
                         clickCount++;
@@ -208,27 +204,27 @@ public class Fishing {
                         int maxClicks = Faketils.config().fishingHelperKillingAmount;
                         if (clickCount >= maxClicks) {
                             clickCount = 0;
+                            nextWeaponUseTick = 0L;
                             weaponState = STATE_WAIT_SWITCH_BACK;
-                            delayCounter = random.nextInt(4) + 2;
+                            delayCounter = WEAPON_RESTORE_DELAY_TICKS;
                         } else {
-                            delayCounter = random.nextInt(4) + 3;
+                            nextWeaponUseTick = mc.level == null
+                                    ? 0L
+                                    : mc.level.getGameTime() + MULTI_WEAPON_USE_COOLDOWN_TICKS;
+                            delayCounter = 0;
                         }
                     }
                 }
                 case STATE_WAIT_SWITCH_BACK -> {
                     if (delayCounter-- <= 0) {
-                        weaponState = STATE_SWITCH_BACK;
-                    }
-                }
-                case STATE_SWITCH_BACK -> {
-                    inventory.setSelectedSlot(originalSlot);
-                    Utils.log("Switched back to original slot.");
-
-                    if (Faketils.config().fishingLookDown) {
-                        RotationHandler.setTarget(savedYaw, savedPitch);
-                        weaponState = STATE_POST_ROTATE;
-                    } else {
-                        weaponState = STATE_DONE;
+                        inventory.setSelectedSlot(originalSlot);
+                        Utils.log("Switched back to original slot.");
+                        if (Faketils.config().fishingLookDown) {
+                            RotationHandler.setTarget(savedYaw, savedPitch);
+                            weaponState = STATE_POST_ROTATE;
+                        } else {
+                            weaponState = STATE_DONE;
+                        }
                     }
                 }
                 case STATE_POST_ROTATE -> {

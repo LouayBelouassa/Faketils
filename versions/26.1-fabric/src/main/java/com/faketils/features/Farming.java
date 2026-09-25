@@ -86,6 +86,8 @@ public class Farming {
     private static PestResumePhase pestResumePhase = PestResumePhase.IDLE;
     private static long pestResumeActionAt = -1L;
     private static int pausedFarmingToolSlot = -1;
+    private static boolean awaitingPestCompletion = false;
+    private static boolean awaitingHuntCompletion = false;
 
     private static enum EqState { IDLE, OPENING, WAIT_AFTER_OPEN, SEARCHING_ITEMS, PICKUP_CLICKED, PLACE_CLICKED, FINISHED_ITEMS }
     private static EqState eqState = EqState.IDLE;
@@ -120,7 +122,7 @@ public class Farming {
 
     private static int emptyScans = 0;
 
-    private static enum PestPhase { ROOTED, SQUEAKY }
+    private static enum PestPhase { ROOTED, SQUEAKY, HUNTING }
     private static PestPhase currentPestPhase = PestPhase.ROOTED;
 
     private static int lastSeenSyncId = -1;
@@ -311,12 +313,17 @@ public class Farming {
                     new Thread(() -> {
                         try {
                             Thread.sleep(2000);
-                            startEqSequence(PestPhase.ROOTED);
+                            awaitingHuntCompletion = false;
+                            if (Faketils.config().pestHunting) {
+                                startEqSequence(PestPhase.HUNTING);
+                            } else {
+                                startEqSequence(PestPhase.ROOTED);
+                            }
                             eqActive = true;
                             currentState = "Changing EQ";
                             eqState = EqState.OPENING;
                             eqStateStart = System.currentTimeMillis();
-                            currentPestPhase = PestPhase.ROOTED;
+                            currentPestPhase = Faketils.config().pestHunting ? PestPhase.HUNTING : PestPhase.ROOTED;
                             itemsUsedThisPhase = 0;
                             lastProcessedSyncId = -1;
                         } catch (InterruptedException ignored) {}
@@ -325,6 +332,7 @@ public class Farming {
             }
 
             if (text.contains("There are not any Pests on your Garden right now!")) {
+                completePestCycle();
                 if (killingPests) {
                     killingPests = false;
                     hasPaused = false;
@@ -342,14 +350,18 @@ public class Farming {
                     RotationHandler.reset();
                     currentPestMob = null;
                     needsRetarget = true;
-                    queuePestResume();
-                    if (!Faketils.config().pestFarming) {
-                        currentMode = null;
-                        mc.player.connection.sendCommand("warp garden");
-                        new Thread(() -> {
-                            try { Thread.sleep(150); } catch (InterruptedException ignored) {}
-                            FlyHandler.setFlying(false);
-                        }).start();
+                    if (awaitingHuntCompletion) {
+                        startEqSequence(PestPhase.ROOTED);
+                    } else {
+                        queuePestResume();
+                        if (!Faketils.config().pestFarming) {
+                            currentMode = null;
+                            mc.player.connection.sendCommand("warp garden");
+                            new Thread(() -> {
+                                try { Thread.sleep(150); } catch (InterruptedException ignored) {}
+                                FlyHandler.setFlying(false);
+                            }).start();
+                        }
                     }
                     currentPestTarget = null;
                     pestOffset = Vec3.ZERO;
@@ -392,6 +404,7 @@ public class Farming {
         while (resetKey.consumeClick()) handleReset();
 
         handlePendingPestResume();
+        checkPestCompletion();
 
         if (killingPests && isPaused) {
             currentState = "Killing pests";
@@ -492,9 +505,11 @@ public class Farming {
     private static void startEqSequence(PestPhase phase) {
         if (mc.player == null) return;
         currentPestPhase = phase;
-        eqTargetSlot = (phase == PestPhase.ROOTED)
-                ? Faketils.config().eqSlot
-                : Faketils.config().eqSlotOld;
+        eqTargetSlot = switch (phase) {
+            case ROOTED -> Faketils.config().eqSlot;
+            case SQUEAKY -> Faketils.config().eqSlotOld;
+            case HUNTING -> Faketils.config().huntingLoadout;
+        };
         eqPhase = EqPhase.OPEN_SENT;
         eqPhaseStart = System.currentTimeMillis();
         eqMenuOpenedAt = -1L;
@@ -517,6 +532,18 @@ public class Farming {
             }
             eqPhase = EqPhase.IDLE;
             eqActive = false;
+            if (awaitingHuntCompletion) {
+                awaitingHuntCompletion = false;
+                queuePestResume();
+                if (!Faketils.config().pestFarming) {
+                    currentMode = null;
+                    mc.player.connection.sendCommand("warp garden");
+                    new Thread(() -> {
+                        try { Thread.sleep(150); } catch (InterruptedException ignored) {}
+                        FlyHandler.setFlying(false);
+                    }).start();
+                }
+            }
             return;
         }
 
@@ -592,7 +619,25 @@ public class Farming {
         eqActive = false;
         Utils.log("Loadout equipped; closing loadout screen and resuming farming.");
 
-        if (currentPestPhase == PestPhase.ROOTED && isActive && !isPaused && plot > 0) {
+        if (currentPestPhase == PestPhase.HUNTING && !awaitingHuntCompletion) {
+            awaitingHuntCompletion = true;
+        }
+
+        if (currentPestPhase == PestPhase.ROOTED && awaitingHuntCompletion) {
+            awaitingHuntCompletion = false;
+            queuePestResume();
+            if (!Faketils.config().pestFarming) {
+                currentMode = null;
+                mc.player.connection.sendCommand("warp garden");
+                new Thread(() -> {
+                    try { Thread.sleep(150); } catch (InterruptedException ignored) {}
+                    FlyHandler.setFlying(false);
+                }).start();
+            }
+            return;
+        }
+
+        if ((currentPestPhase == PestPhase.ROOTED || currentPestPhase == PestPhase.HUNTING) && isActive && !isPaused && plot > 0) {
             if (Faketils.config().dayNightSwapping) {
                 requestGardenTimeSwap(true, PendingPestAction.PAUSE_AND_WARP_TO_PEST);
             } else {
@@ -733,6 +778,7 @@ public class Farming {
                     return;
                 }
                 handlePause();
+                awaitingPestCompletion = true;
                 new Thread(() -> {
                     try {
                         Thread.sleep(nextCommandDelay());
@@ -773,6 +819,30 @@ public class Farming {
 
         pestResumePhase = PestResumePhase.RESTORE_FARMING_TOOL;
         pestResumeActionAt = System.currentTimeMillis() + TOOL_RESTORE_DELAY;
+    }
+
+    private static void checkPestCompletion() {
+        if (!awaitingPestCompletion) {
+            return;
+        }
+
+        if (TabListParser.getTabLines().stream().anyMatch(line -> Utils.cleanSB(line).contains("Alive: 0"))) {
+            completePestCycle();
+        }
+    }
+
+    private static void completePestCycle() {
+        if (!awaitingPestCompletion) {
+            return;
+        }
+
+        awaitingPestCompletion = false;
+        if (awaitingHuntCompletion) {
+            startEqSequence(PestPhase.ROOTED);
+        } else {
+            queuePestResume();
+        }
+        Utils.log("All pests cleared; restoring farming tool and resuming macro.");
     }
 
     private static void handlePendingPestResume() {
@@ -851,7 +921,7 @@ public class Farming {
                         Utils.log("Final slot restore: " + originalHotbarSlot);
                     }
 
-                    if (currentPestPhase == PestPhase.ROOTED) {
+                    if (currentPestPhase == PestPhase.ROOTED || currentPestPhase == PestPhase.HUNTING) {
                         Utils.log("Rooted pest items handled → pausing macro");
                         handlePause();
                         movementBlockTicks = 10;
@@ -1168,14 +1238,18 @@ public class Farming {
                 RotationHandler.reset();
                 currentPestMob = null;
                 needsRetarget = true;
-                queuePestResume();
-                if (!Faketils.config().pestFarming) {
-                    currentMode = null;
-                    mc.player.connection.sendCommand("warp garden");
-                    new Thread(() -> {
-                        try { Thread.sleep(150); } catch (InterruptedException ignored) {}
-                        FlyHandler.setFlying(false);
-                    }).start();
+                if (awaitingHuntCompletion) {
+                    startEqSequence(PestPhase.ROOTED);
+                } else {
+                    queuePestResume();
+                    if (!Faketils.config().pestFarming) {
+                        currentMode = null;
+                        mc.player.connection.sendCommand("warp garden");
+                        new Thread(() -> {
+                            try { Thread.sleep(150); } catch (InterruptedException ignored) {}
+                            FlyHandler.setFlying(false);
+                        }).start();
+                    }
                 }
                 currentPestTarget = null;
                 pestOffset = Vec3.ZERO;
@@ -1273,6 +1347,8 @@ public class Farming {
             pestOffset = Vec3.ZERO;
             lastOffsetChange = 0L;
             originalPestKillSlot = -1;
+            awaitingPestCompletion = false;
+            awaitingHuntCompletion = false;
             needsRetarget = true;
             currentPestStand = null;
             currentPestMob = null;
@@ -1534,22 +1610,24 @@ public class Farming {
         List<BlockPos> left  = FarmingWaypoints.WAYPOINTS.getOrDefault("left", List.of());
         List<BlockPos> warp  = FarmingWaypoints.WAYPOINTS.getOrDefault("warp", List.of());
 
-        if (warp.contains(pos)) {
+        if (warp.contains(pos) && !pos.equals(lastWaypoint)) {
             mc.player.connection.sendCommand("warp garden");
             currentMode = "none";
             releaseAllKeys();
+            lastWaypoint = pos;
         } else if (right.contains(pos)) {
             currentMode = "right";
             currentState = "right";
+            lastWaypoint = pos;
         } else if (left.contains(pos)) {
             currentMode = "left";
             currentState = "left";
+            lastWaypoint = pos;
         } else {
-            currentMode = "none";
-            releaseAllKeys();
+            // A block waypoint switches modes once. Leaving the block must not cancel the held inputs.
+            lastWaypoint = null;
         }
 
-        lastWaypoint = null;
         ticksOnWaypoint = 0;
     }
 
@@ -1906,7 +1984,10 @@ public class Farming {
         if (killingPests) return;
         if (!isActive || isPaused) return;
 
-        boolean sprayNone = TabListParser.getTabLines().stream().anyMatch(s -> s.contains("Spray: None"));
+        boolean sprayNone = TabListParser.getTabLines().stream()
+                .map(Utils::cleanSB)
+                .map(name -> name.toLowerCase(Locale.ROOT))
+                .anyMatch(name -> name.contains("spray: none"));
         long now = System.currentTimeMillis();
 
         if (sprayNone) {
@@ -1929,12 +2010,9 @@ public class Farming {
             ItemStack stack = mc.player.getInventory().getItem(i);
             if (stack.isEmpty()) continue;
 
-            String name = stack.getHoverName().getString()
-                    .replaceAll("§.", "")
-                    .toLowerCase()
-                    .trim();
+            String name = Utils.cleanSB(stack.getHoverName().getString()).toLowerCase(Locale.ROOT);
 
-            if (name.contains("sprayonator")) {
+            if (isSprayonator(name)) {
                 originalSpraySlot = inv.getSelectedSlot();
                 sprayHotbarSlot = i;
 
@@ -1948,6 +2026,12 @@ public class Farming {
                 break;
             }
         }
+    }
+
+    private static boolean isSprayonator(String itemName) {
+        return itemName.contains("sprayonator") ||
+                itemName.contains("salty sprayonator") ||
+                itemName.contains("juicy sprayonator");
     }
 
     private static void handleSpraySequence() {

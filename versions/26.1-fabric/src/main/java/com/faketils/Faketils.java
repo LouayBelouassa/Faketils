@@ -41,6 +41,8 @@ public class Faketils implements ClientModInitializer {
         FarmingTitleRenderer.init();
         SphinxSolver.init();
         PestHelper.initialize();
+        MobEsp.initialize();
+        Mining.initialize();
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player != null && client.level != null) {
